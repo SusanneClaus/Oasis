@@ -72,9 +72,9 @@ up Ar and then using the following to create A:
 ################### Problem dependent parameters ####################
 
 #from DrivenCavity import *
-from Channel import *
+#from Channel import *
 #from TaylorGreen2D import *
-#from TaylorGreen3D import *
+from TaylorGreen3D import *
 
 #####################################################################
 
@@ -118,7 +118,7 @@ x_  = dict((ui, q_ [ui].vector()) for ui in sys_comp)     # Solution vectors t
 x_1 = dict((ui, q_1[ui].vector()) for ui in u_components) # Solution vectors t - dt
 x_2 = dict((ui, q_2[ui].vector()) for ui in u_components) # Solution vectors t - 2*dt
 
-###################  Initialize solution ############################
+###################  Initialize solution  ###########################
 
 initialize(globals())
 
@@ -126,11 +126,11 @@ initialize(globals())
 
 bcs = create_bcs()
 
-#####################################################################
+###################  Fetch solvers        ###########################
 
 u_sol, p_sol, du_sol = get_solvers()
 
-################### Fetch solvers  ##################################
+#####################################################################
 
 # Preassemble constant pressure gradient matrix
 P = dict((ui, assemble(v*p.dx(i)*dx)) for i, ui in enumerate(u_components))

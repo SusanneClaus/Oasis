@@ -53,7 +53,7 @@ class PeriodicDomain(SubDomain):
 
 constrained_domain = PeriodicDomain()
 
-# Override some problem specific parameters and put the variables in DC_dict
+# Override some problem specific parameters 
 T = 4.
 #dt = 0.25*T/ceil(T/0.2/mesh.hmin())
 dt = 0.01

@@ -18,9 +18,9 @@ Ny = 12
 Nz = 12
 NS_parameters.update(dict(Lx=Lx, Ly=Ly, Lz=Lz, Nx=Nx, Ny=Ny, Nz=Nz))
 
-restart_folder = 'channel_results/data/dt=5.0000e-02/4/Checkpoint'
+#restart_folder = 'channel_results/data/dt=5.0000e-02/1/Checkpoint'
 #restart_folder = 'channel_results/data/dt=5.0000e-02/10/timestep=60'
-#restart_folder = None
+restart_folder = None
 
 ### If restarting previous solution then read in parameters ########
 if not restart_folder is None:
@@ -42,10 +42,7 @@ sys_comp =  u_components + ['p']
 class PeriodicDomain(SubDomain):
 
     def inside(self, x, on_boundary):
-        # return True if on left or bottom boundary AND NOT on one of the two slave edges
-        #return bool((near(x[0], 0) or near(x[2], -Lz/2.)) and 
-                #(not ((near(x[0], Lx) and near(x[2], -Lz/2.)) or 
-                      #(near(x[0], 0) and near(x[2], Lz/2.)))) and on_boundary)
+        # return True if on left or bottom boundary AND NOT on one of the two slave faces
         return bool((near(x[0], 0) or near(x[2], -Lz/2.)) and 
                 (not (near(x[0], Lx) or near(x[2], Lz/2.))) and on_boundary)
                       
@@ -66,11 +63,11 @@ class PeriodicDomain(SubDomain):
             y[0] = -1000
             y[1] = -1000
             y[2] = -1000
-            
+
 constrained_domain = PeriodicDomain()
 
 if restart_folder is None:
-    # Override some problem specific parameters and put the variables in DC_dict
+    # Override some problem specific parameters
     T = 1.
     dt = 0.05
     folder = "channel_results"
@@ -109,16 +106,9 @@ f = Constant((utau**2, 0., 0.))
 def pre_solve(NS_dict):    
     """Called prior to time loop"""
     globals().update(NS_dict)
-    uv = Function(Vv) 
-    velocity_plotter = VTKPlotter(uv)
-    pressure_plotter = VTKPlotter(p_) 
-    globals().update(uv=uv, 
-                   velocity_plotter=velocity_plotter,
-                   pressure_plotter=pressure_plotter)
 
 # Specify boundary conditions
-def create_bcs():
-    
+def create_bcs():    
     bcs = dict((ui, []) for ui in sys_comp)
     
     def inlet(x, on_bnd):
@@ -157,7 +147,7 @@ class RandomStreamVector(Expression):
     
 def initialize(NS_dict):
     globals().update(NS_dict)
-    global voluviz, stats 
+    global voluviz, stats
     tol = 1e-8
     voluviz = StructuredGrid(V, [Nx, Ny, Nz], [tol, -Ly/2.+tol, -Lz/2.+tol], [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], [Lx-2*tol, Ly-2*tol, Lz-2*tol], statistics=False)
     stats = ChannelGrid(V, [Nx/5, Ny, Nz/5], [tol, -Ly/2.+tol, -Lz/2.+tol], [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], [Lx-2*tol, Ly-2*tol, Lz-2*tol], statistics=True)
@@ -257,10 +247,6 @@ def update_end_of_timestep(tstep):
         voluviz(enstrophy)
         voluviz.toh5(0, tstep, filename=h5folder+"/snapshot_Q_{}.h5".format(tstep))
         voluviz.probes.clear()
-        
-        uv.assign(project(u_, Vv))
-        pressure_plotter.plot()
-        velocity_plotter.plot()
     
 def theend():
     pass
