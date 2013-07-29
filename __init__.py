@@ -1,19 +1,10 @@
 """
 Optimized And StrIpped Solvers
 """
-from dolfin import *
-from NSCommon import *
+from NSdefault_hooks import *
 
-from mpi4py import MPI as nMPI
 from commands import getoutput
 import time, copy
-
-#parameters["linear_algebra_backend"] = "Epetra"
-parameters["linear_algebra_backend"] = "PETSc"
-parameters["form_compiler"]["optimize"]     = True
-parameters["form_compiler"]["cpp_optimize"] = True
-
-comm = nMPI.COMM_WORLD
 
 def getMyMemoryUsage():
     mypid = getpid()
@@ -35,6 +26,15 @@ def Strain(u):
 
 def QC(u):
     return Omega(u) - Strain(u)
+
+def recursive_update(dst, src):
+    """Update dict dst with items from src deeply ("deep update")."""
+    for key, val in src.items():
+        if key in dst and isinstance(val, dict) and isinstance(dst[key], dict):
+            dst[key] = recursive_update(dst[key], val)
+        else:
+            dst[key] = val
+    return dst
             
 # The following helper functions are available in dolfin
 # They are redefined here for printing only on process 0. 
@@ -42,15 +42,14 @@ RED   = "\033[1;37;31m%s\033[0m"
 BLUE  = "\033[1;37;34m%s\033[0m"
 GREEN = "\033[1;37;32m%s\033[0m"
 
-def info_blue(s):
-    if MPI.process_number()==0:
+def info_blue(s, check=True):
+    if MPI.process_number()==0 and check:
         print BLUE % s
 
-def info_green(s):
-    if MPI.process_number()==0:
+def info_green(s, check=True):
+    if MPI.process_number()==0 and check:
         print GREEN % s
     
-def info_red(s):
-    if MPI.process_number()==0:
+def info_red(s, check=True):
+    if MPI.process_number()==0 and check:
         print RED % s
-        

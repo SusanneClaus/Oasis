@@ -3,9 +3,14 @@ __date__ = "2013-06-25"
 __copyright__ = "Copyright (C) 2013 " + __author__
 __license__  = "GNU Lesser GPL version 3 or any later version"
 
-from dolfin import MPI, File, Constant, KrylovSolver, LUSolver
+from dolfin import *
 import cPickle
 from os import getpid, path, makedirs, getcwd, listdir, remove, system
+
+#parameters["linear_algebra_backend"] = "Epetra"
+parameters["linear_algebra_backend"] = "PETSc"
+parameters["form_compiler"]["optimize"]     = True
+parameters["form_compiler"]["cpp_optimize"] = True
 
 # Default parameters
 NS_parameters = dict(
@@ -17,14 +22,15 @@ NS_parameters = dict(
   max_error = 1e-6,
   iters_on_first_timestep = 2,
   dt = 0.01,
-  checkpoint = 10, # Overwrite solution in Checkpoint folder each checkpoint tstep
-  save_step = 10,  # Store solution in new folder each save_step tstep
-  folder = 'results',
+  plot_interval = 10,
+  checkpoint = 10,       # Overwrite solution in Checkpoint folder each checkpoint tstep
+  save_step = 10,        # Store solution in new folder each save_step tstep
+  folder = 'results',    # Relative folder for storing results 
   restart_folder = None, # If restarting solution, set the folder holder the solution to start from here
   use_lumping_of_mass_matrix = False,
   use_krylov_solvers = False,
   velocity_degree = 2,
-  pressure_degree = 1,
+  pressure_degree = 1,  
   krylov_solvers = dict(
     monitor_convergence = False,
     report = False,
@@ -32,10 +38,13 @@ NS_parameters = dict(
     nonzero_initial_guess = True,
     maximum_iterations = 100,
     relative_tolerance = 1e-8,
-    absolute_tolerance = 1e-8)  
+    absolute_tolerance = 1e-8)
 )
 
 constrained_domain = None
+
+# To solve for scalars provide a list like ['scalar1', 'scalar2']
+scalar_components = []
 
 def create_initial_folders(folder, dt):
     # To avoid writing over old data create a new folder for each run
@@ -58,12 +67,13 @@ def create_initial_folders(folder, dt):
         
     return newfolder
 
-def save_solution(tstep, t, q_, q_1, params):
-    params.update(t=t, tstep=tstep)
-    if tstep % params['save_step'] == 0: 
-        save_tstep_solution(tstep, q_, params)
-    if tstep % params['checkpoint'] == 0:
-        save_checkpoint_solution(tstep, q_, q_1, params)
+def save_solution(tstep, t, q_, q_1, NS_parameters, save_step, checkpoint, 
+                  **NS_namespace):
+    NS_parameters.update(t=t, tstep=tstep)
+    if tstep % save_step == 0: 
+        save_tstep_solution(tstep, q_, NS_parameters)
+    if tstep % checkpoint == 0:
+        save_checkpoint_solution(tstep, q_, q_1, NS_parameters)
 
 def save_tstep_solution(tstep, q_, params):        
     newfolder = path.join(params['newfolder'], 'timestep='+str(tstep))
@@ -100,107 +110,114 @@ def save_checkpoint_solution(tstep, q_, q_1, params):
             cfile_1 = File(path.join(checkpointfolder, ui + '_1.xml.gz'))
             cfile_1 << q_1[ui]
 
-def check_if_kill(tstep, t, q_, q_1, params):
-    params.update(t=t, tstep=tstep)
-    if 'killoasis' in listdir(params['folder']):
-        save_checkpoint_solution(tstep, q_, q_1, params)
+def check_if_kill(tstep, t, q_, q_1, NS_parameters, folder, info_red, **NS_namespace):
+    NS_parameters.update(t=t, tstep=tstep)
+    if 'killoasis' in listdir(folder):
+        info_red('killoasis Found! Stopping simulations cleanly...')
+        save_checkpoint_solution(tstep, q_, q_1, NS_parameters)
         MPI.barrier()
         if MPI.process_number() == 0: 
-            remove(path.join(params['folder'], 'killoasis'))        
+            remove(path.join(folder, 'killoasis'))
         return True
     else:
         return False
         
 def body_force(mesh, **NS_namespace):
-    # Specify body force
+    """Specify body force"""
     return Constant((0,)*mesh.geometry().dim())
 
 def initialize(**NS_namespace):
-    pass
+    """Initialize solution. Could also be used to create new variables 
+    or parameters that can be placed in the NS_namespace and then be
+    used for, e.g., postprocessing"""
+    return {}
 
-# Specify boundary conditions. Default empty 
-def create_bcs(mesh, sys_comp, **NS_namespace):
+def create_bcs(sys_comp, **NS_namespace):
+    """Return dictionary of Dirichlet boundary conditions."""
     return dict((ui, []) for ui in sys_comp)
 
-# Set up default linear solvers
 def get_solvers(use_krylov_solvers, use_lumping_of_mass_matrix, 
-                krylov_solvers, sys_comp, **NS_namespace):
-    """return three solvers, velocity, pressure and velocity update.
-    In case of lumping return None for velocity update"""
+                krylov_solvers, sys_comp, bcs, x_, Q, **NS_namespace):
+    """Return solvers for all fields we are solving for.
+    In case of lumping return None for velocity update."""
     if use_krylov_solvers:
         u_sol = KrylovSolver('bicgstab', 'jacobi')
         u_sol.parameters.update(krylov_solvers)
         u_sol.parameters['preconditioner']['reuse'] = False
         u_sol.t = 0
-
         if use_lumping_of_mass_matrix:
             du_sol = None
         else:
             du_sol = KrylovSolver('bicgstab', 'hypre_euclid')
             du_sol.parameters.update(krylov_solvers)
             du_sol.parameters['preconditioner']['reuse'] = True
-            du_sol.t = 0
-            
-        p_sol = KrylovSolver('gmres', 'hypre_amg')
+            du_sol.t = 0            
+        p_sol = KrylovSolver('gmres', 'petsc_amg')
         p_sol.parameters['preconditioner']['reuse'] = True
         p_sol.parameters.update(krylov_solvers)
         p_sol.t = 0
-        sols = [u_sol, p_sol, du_sol]
-        if 'c' in sys_comp:
-            c_sol = KrylovSolver('bicgstab', 'jacobi')
-            c_sol.parameters.update(krylov_solvers)
-            c_sol.parameters['preconditioner']['reuse'] = False
-            c_sol.t = 0
-            sols.append(c_sol)
-
+        if bcs['p'] == []:
+            attach_pressure_nullspace(p_sol, x_, Q)
     else:
         u_sol = LUSolver()
         u_sol.t = 0
-
         if use_lumping_of_mass_matrix:
             du_sol = None
         else:
             du_sol = LUSolver()
             du_sol.parameters['reuse_factorization'] = True
             du_sol.t = 0
-
         p_sol = LUSolver()
         p_sol.parameters['reuse_factorization'] = True
-        p_sol.t = 0
-        sols = [u_sol, p_sol, du_sol]
-        
-        if 'c' in sys_comp:
-            c_sol = LUSolver()
-            c_sol.t = 0
-            sols.append(c_sol)
+        p_sol.t = 0  
+        if bcs['p'] == []:
+            p_sol.normalize = True
             
-    return sols
+    return [u_sol, p_sol, du_sol] 
 
-def pre_solve(**NS_namespace):
-    pass
+def attach_pressure_nullspace(p_sol, x_, Q):
+    # Create vector that spans the null space
+    null_vec = Vector(x_['p'])
+    Q.dofmap().set(null_vec, 1.0)
+    null_vec *= 1.0/null_vec.norm("l2")
+    # Create null space basis object and attach to Krylov solver
+    null_space = VectorSpaceBasis([null_vec])
+    p_sol.set_nullspace(null_space)
+    p_sol.null_space = null_space
 
-def pre_velocity_tentative_solve(ui, use_krylov_solvers, u_sol, 
-                                 **NS_namespace):   
+def velocity_tentative_hook(ui, use_krylov_solvers, u_sol, 
+                                 **NS_namespace):
+    """Called just prior to solving tentative velocity"""
     if use_krylov_solvers:
         if ui == "u0":
             u_sol.parameters['preconditioner']['reuse'] = False
         else:
             u_sol.parameters['preconditioner']['reuse'] = True
 
-def pre_pressure_solve(**NS_namespace):
+def pressure_hook(**NS_namespace):
+    """Called prior to pressure solve."""
     pass
 
-def pre_new_timestep(**NS_parameters):
+def start_timestep_hook(**NS_parameters):
+    """Called at start of new timestep"""
     pass
 
-def pre_velocity_update_solve(**NS_namespace):
+def velocity_update_hook(**NS_namespace):
+    """Called prior to velocity update solve."""
     pass
 
-def pre_scalar_solve(**NS_namespace):
+def scalar_hook(**NS_namespace):
+    """Called prior to scalar solve."""
     pass
 
-def update_end_of_timestep(**NS_namespace):
+def temporal_hook(**NS_namespace):
+    """Called at end of a timestep."""
     pass
+
+def pre_solve_hook(**NS_namespace):
+    """Called just prior to entering time-loop. Must return a dictionary."""
+    return {}
 
 def theend(**NS_namespace):
+    """Called at the very end."""
     pass
